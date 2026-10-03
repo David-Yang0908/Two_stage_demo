@@ -1,0 +1,24 @@
+# 虛擬環境
+venv/
+.env/
+env/
+
+# 模型權重 (Weights)
+*.pth
+*.pt
+*weight*
+
+# 龐大資料集與圖片
+MADOS/
+*.tif
+*.jpg
+*.png
+
+# Python 快取
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 壓縮檔與影片
+*.zip
+*.mp4

@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Marine Eye - Hybrid Evaluation Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #121212; color: #e0e0e0; height: 100vh; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .panel { background-color: #1e1e1e; border: 1px solid #333; border-radius: 8px; padding: 15px; height: calc(100vh - 40px); margin-top: 20px; display: flex; flex-direction: column; }
+        
+        .nav-tabs { border-bottom: 1px solid #444; flex-wrap: nowrap; }
+        .nav-tabs .nav-link { color: #888; border: none; cursor: pointer; padding: 8px 12px; font-size: 0.95rem; white-space: nowrap; }
+        .nav-tabs .nav-link.active { background-color: #2a2a2a; color: #0dcaf0; border-bottom: 2px solid #0dcaf0; }
+        
+        .list-container { flex-grow: 1; overflow-y: auto; background: #2a2a2a; border-radius: 0 0 5px 5px; padding: 5px; margin-bottom: 15px; }
+        .list-group-item { background: transparent; border: none; color: #ccc; cursor: pointer; border-bottom: 1px solid #333; padding: 6px 10px; display: flex; align-items: center; justify-content: space-between;}
+        .list-group-item:hover { background-color: #3a3a3a; }
+        .list-group-item.active-view { background-color: #0d6efd; color: white; }
+        .form-check-input { margin-right: 10px; cursor: pointer; }
+        .roi-thumb { width: 45px; height: 45px; object-fit: cover; border-radius: 4px; border: 1px solid #555; background-color: #000; margin-left: 10px; }
+        
+        .visualizer-wrapper { width: 100%; flex-grow: 1; position: relative; display: flex; justify-content: center; align-items: center; margin-bottom: 5px; overflow: hidden;}
+        .visualizer-container { width: 100%; max-width: 75vh; aspect-ratio: 1 / 1; position: relative; } 
+        
+        .img-box { width: 100%; height: 100%; background: #000; border: 1px solid #444; border-radius: 5px; display: flex; justify-content: center; align-items: center; position: absolute; top: 0; left: 0; overflow: hidden; transition: opacity 0.3s; z-index: 2; }
+        .img-box.hidden { opacity: 0; pointer-events: none; z-index: 0; }
+        
+        .grid-box { width: 100%; height: 100%; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 6px; position: absolute; top: 0; left: 0; opacity: 0; pointer-events: none; transition: opacity 0.3s; z-index: 1; }
+        .grid-box.active { opacity: 1; pointer-events: auto; z-index: 3; }
+        
+        .grid-item { position: relative; background: #000; border: 1px solid #555; border-radius: 4px; overflow: hidden; display: flex; justify-content: center; align-items: center; }
+        .grid-label { position: absolute; top: 5px; left: 5px; background: rgba(0,0,0,0.6); color: #fff; padding: 2px 6px; border-radius: 3px; font-size: 0.75rem; z-index: 10; border: 1px solid #444; }
+        
+        .layer { position: absolute; width: 100%; height: 100%; object-fit: contain; transition: opacity 0.3s; }
+        .layer-base { z-index: 1; opacity: 1; }
+        .layer-overlay { z-index: 2; opacity: 0; pointer-events: none; }
+        
+        .btn-grid { width: 42px; height: 38px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; padding: 0; line-height: 0; padding-bottom: 4px;}
+        
+        /* 🚨 S1 Gallery View Styles (強制 7 張一排，並縮小邊距與字體) */
+        .s1-gallery-container { position: absolute; top: 0; left: 0; right: 0; bottom: 0; overflow-y: auto; background: #1e1e1e; padding: 15px; display: flex; flex-direction: column; z-index: 5;}
+        .s1-gallery-container.hidden { display: none !important; }
+        .gallery-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-bottom: 20px; }
+        .gallery-item { display: flex; flex-direction: column; align-items: center; background: #2a2a2a; padding: 6px; border-radius: 6px; border: 1px solid #444; cursor: pointer; transition: transform 0.2s, border-color 0.2s;}
+        .gallery-item:hover { transform: scale(1.08); border-color: #0dcaf0; z-index: 10; box-shadow: 0 4px 8px rgba(0,0,0,0.5);}
+        .gallery-title { font-size: 0.65rem; color: #e0e0e0; margin-bottom: 4px; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center; font-weight: bold;}
+        .gallery-item img { width: 100%; aspect-ratio: 1/1; object-fit: cover; border-radius: 4px; margin-bottom: 5px; border: 1px solid #111; }
+        .gallery-item .badge { font-size: 0.6rem; width: 100%; padding: 4px 2px;}
+
+        .metrics-box { background: #2a2a2a; border-radius: 5px; padding: 10px 15px; margin-bottom: 10px; }
+        .metric-row { display: flex; justify-content: space-between; border-bottom: 1px solid #444; padding: 8px 0; font-family: monospace; font-size: 1rem;}
+        .metric-value { font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div class="container-fluid px-4">
+    <div class="row">
+        
+        <!-- Left Panel: Control -->
+        <div class="col-md-3">
+            <div class="panel">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h5 class="text-info m-0">Workflow Control</h5>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="fullRefresh()">Refresh System</button>
+                </div>
+
+                <div class="mb-3">
+                    <select id="stage1-model" class="form-select form-select-sm bg-dark text-info border-secondary mb-2">
+                        <option value="EB2">Stage 1 Model: EfficientNetB2</option>
+                        <option value="ConvNeXt">Stage 1 Model: ConvNeXt</option>
+                    </select>
+                    <div class="d-flex flex-column gap-2">
+                        <button class="btn btn-outline-primary btn-sm text-start ps-3 fw-bold" onclick="runEvaluation('stage1')">▶ Two-stage (S1 Filter)</button>
+                        <button class="btn btn-outline-success btn-sm text-start ps-3 fw-bold" onclick="runEvaluation('baseline')">▶ Baseline (11ch Seg)</button>
+                    </div>
+                </div>
+                
+                <ul class="nav nav-tabs" id="myTab" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="tab-data" data-bs-toggle="tab" data-bs-target="#pane-data" type="button">Test Set</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="tab-stage1" data-bs-toggle="tab" data-bs-target="#pane-stage1" type="button">Stage 1 Status</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="tab-stage2" data-bs-toggle="tab" data-bs-target="#pane-stage2" type="button">Stage 2 Results</button>
+                    </li>
+                </ul>
+
+                <div class="tab-content list-container" id="myTabContent">
+                    <div class="tab-pane fade show active h-100" id="pane-data" role="tabpanel">
+                        <div class="d-flex gap-1 mb-2 mt-2 px-2">
+                            <button class="btn btn-sm btn-warning w-100 fw-bold shadow-sm" onclick="randomSelect20()">🎲 Random Select 20</button>
+                        </div>
+                        <div class="d-flex gap-2 mb-2 px-2">
+                            <button class="btn btn-sm btn-outline-success w-50 shadow-sm" onclick="selectByOil('all')">☑ Select All</button>
+                            <button class="btn btn-sm btn-outline-danger w-50 shadow-sm" onclick="deselectAll()">🚫 Deselect All</button>
+                        </div>
+                        <div class="px-2 mb-2 text-end">
+                            <span id="selected-count" class="badge bg-secondary">0 selected</span>
+                        </div>
+                        <div id="file-list" class="p-2"></div>
+                    </div>
+
+                    <div class="tab-pane fade h-100 p-2" id="pane-stage1" role="tabpanel">
+                        <button class="btn btn-sm btn-outline-danger w-100 mb-2" onclick="runStage2ForCandidates()">
+                            ▶ Run Stage 2 for Candidates
+                        </button>
+                        <h6 class="text-warning mt-2 border-bottom border-secondary pb-1">Candidates (To Stage 2)</h6>
+                        <div id="list-candidates" class="mb-3"></div>
+                        <h6 class="text-success border-bottom border-secondary pb-1">Excluded (Filtered Out)</h6>
+                        <div id="list-excluded"></div>
+                    </div>
+
+                    <div class="tab-pane fade h-100 p-2" id="pane-stage2" role="tabpanel">
+                        <h6 class="text-info mt-2 border-bottom border-secondary pb-1">Segmentation Completed</h6>
+                        <div id="list-stage2" class="mb-3"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Middle Panel: Visualizer -->
+        <div class="col-md-6">
+            <div class="panel">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h5 class="text-info m-0">Visualizer: <span id="current-view-name" class="text-light">Not Selected</span></h5>
+                </div>
+
+                <div class="progress mb-2" style="height: 12px; display: none;" id="eval-progress-container">
+                    <div id="eval-progress-bar" class="progress-bar progress-bar-striped progress-bar-animated bg-info" role="progressbar" style="width: 0%;"></div>
+                </div>
+                
+                <div class="d-flex justify-content-center align-items-center mb-3">
+                    <div class="btn-group" role="group" id="view-controls" style="height: 38px;">
+                        <input type="radio" class="btn-check" name="viewRadio" id="btn-rgb" checked onchange="switchView('rgb')">
+                        <label class="btn btn-outline-info d-flex align-items-center" for="btn-rgb">RGB Image</label>
+
+                        <input type="radio" class="btn-check" name="viewRadio" id="btn-gt" onchange="switchView('gt')">
+                        <label class="btn btn-outline-info d-flex align-items-center" for="btn-gt">Ground Truth</label>
+
+                        <input type="radio" class="btn-check" name="viewRadio" id="btn-pred" onchange="switchView('pred')" disabled>
+                        <label class="btn btn-outline-info d-flex align-items-center" id="label-pred" for="btn-pred">Prediction</label>
+
+                        <input type="radio" class="btn-check" name="viewRadio" id="btn-overlay" onchange="switchView('overlay')" disabled>
+                        <label class="btn btn-outline-info d-flex align-items-center" id="label-overlay" for="btn-overlay">Overlay</label>
+                    </div>
+                    <!-- Gallery & Grid Buttons -->
+                    <button class="btn btn-outline-light ms-3 btn-grid" id="btn-toggle-grid" onclick="toggleGrid()" title="Grid View">⊞</button>
+                    <button class="btn btn-outline-warning ms-2 btn-grid" id="btn-s1-gallery" onclick="toggleS1Gallery()" title="Stage 1 Gallery View">🖼️</button>
+                </div>
+
+                <div class="visualizer-wrapper">
+                    <!-- Original Image Visualizer -->
+                    <div class="visualizer-container" id="main-vis-container">
+                        <div class="img-box" id="img-box">
+                            <img id="layer-rgb" class="layer layer-base" src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=">
+                            <img id="layer-gt" class="layer layer-overlay" src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=">
+                            <img id="layer-pred" class="layer layer-overlay" src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=">
+                        </div>
+                        
+                        <div class="grid-box" id="grid-box">
+                            <div class="grid-item">
+                                <span class="grid-label">RGB</span>
+                                <img id="grid-rgb" class="layer layer-base" src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=">
+                            </div>
+                            <div class="grid-item">
+                                <span class="grid-label">Ground Truth</span>
+                                <img id="grid-gt" class="layer layer-base" src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=">
+                            </div>
+                            <div class="grid-item">
+                                <span class="grid-label">Prediction</span>
+                                <img id="grid-pred" class="layer layer-base" src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=">
+                            </div>
+                            <div class="grid-item">
+                                <span class="grid-label">Overlay</span>
+                                <img id="grid-overlay-rgb" class="layer layer-base" src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=">
+                                <img id="grid-overlay-mask" class="layer layer-overlay" style="opacity: 1;" src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Stage 1 Gallery Container -->
+                    <div class="s1-gallery-container hidden" id="s1-gallery-container">
+                        <div class="d-flex justify-content-between align-items-center mb-3 border-bottom border-secondary pb-2">
+                            <h5 class="text-danger m-0">Candidates (Pending Stage 2)</h5>
+                            <span class="badge bg-danger fs-6" id="gallery-cand-count">0</span>
+                        </div>
+                        <div class="gallery-grid" id="gallery-candidates"></div>
+                        
+                        <div class="d-flex justify-content-between align-items-center mt-3 mb-3 border-bottom border-secondary pb-2">
+                            <h5 class="text-success m-0">Excluded (Filtered Out)</h5>
+                            <span class="badge bg-success fs-6" id="gallery-excl-count">0</span>
+                        </div>
+                        <div class="gallery-grid" id="gallery-excluded"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Panel: Dynamic Metrics -->
+        <div class="col-md-3">
+            <div class="panel">
+                <h5 class="text-info mb-2">Single Patch Metrics</h5>
+                <div class="d-flex justify-content-between mb-3 mt-2 px-1 small">
+                    <span class="badge text-dark" style="background-color: #FFCC99;">Skin: Oil</span>
+                    <span class="badge bg-success">Green: Other Masks</span>
+                    <span class="badge text-white" style="background-color: #191966;">Indigo: Sea/Bg</span>
+                </div>
+                
+                <div class="metrics-box mb-3">
+                    <div class="metric-row"><span>Status</span><span id="cur-status" class="metric-value text-light">Viewer Mode</span></div>
+                    <div class="metric-row"><span>Oil Prob (S1)</span><span id="cur-prob" class="metric-value text-secondary">--</span></div>
+                    
+                    <div id="seg-single-metrics">
+                        <div class="metric-row mt-2 border-0"><span>Oil Pixel IoU</span><span id="cur-iou" class="metric-value text-info">-- %</span></div>
+                        <div class="metric-row border-0"><span>Oil Pixel Recall</span><span id="cur-rec" class="metric-value text-info">-- %</span></div>
+                        <div class="metric-row border-0"><span>Oil Pixel Precision</span><span id="cur-prec" class="metric-value text-info">-- %</span></div>
+                    </div>
+
+                    <div id="cls-single-metrics" style="display: none;">
+                        <div class="metric-row mt-2 border-0"><span>Ground Truth</span><span id="cur-actual" class="metric-value">--</span></div>
+                        <div class="metric-row border-0"><span>Stage 1 Action</span><span id="cur-action" class="metric-value">--</span></div>
+                    </div>
+                </div>
+
+                <h5 class="text-warning mb-2 border-top border-secondary pt-3">Overall Performance</h5>
+                <div class="metrics-box">
+                    <div class="metric-row text-muted small border-0 pb-0"><span>Evaluated Patches</span><span id="oa-count">0</span></div>
+                    
+                    <div id="seg-overall-metrics">
+                        <div class="metric-row border-0 mt-2"><span>Overall Oil Pixel IoU</span><span id="oa-iou" class="metric-value text-warning">-- %</span></div>
+                        <div class="metric-row border-0"><span>Overall Oil Pixel Recall</span><span id="oa-rec" class="metric-value text-warning">-- %</span></div>
+                        <div class="metric-row border-0"><span>Overall Oil Pixel Prec.</span><span id="oa-prec" class="metric-value text-warning">-- %</span></div>
+                    </div>
+
+                    <div id="cls-overall-metrics" style="display: none;">
+                        <div class="metric-row border-0 mt-2"><span>Oil Image Recall</span><span id="oa-img-rec" class="metric-value text-success">-- %</span></div>
+                        <div class="metric-row border-0"><span>Oil Image Precision</span><span id="oa-img-prec" class="metric-value text-warning">-- %</span></div>
+                        <div class="metric-row border-0"><span>Correct Excl. (TN)</span><span id="oa-img-tn" class="metric-value text-success">0</span></div>
+                        <div class="metric-row border-0"><span>Missed Oil (FN)</span><span id="oa-img-fn" class="metric-value text-danger">0</span></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    const API_URL = "http://127.0.0.1:8000";
+    let currentRoi = null;
+    let isGridMode = false;
+    let isS1GalleryMode = false;
+    let evalMemory = {}; 
+    let globalStats = { patches: 0, tp: 0, fp: 0, tn: 0, fn: 0 };
+    let lastRunStage = 'baseline';
+
+    function renderFileList(files) {
+        const list = document.getElementById('file-list');
+        list.innerHTML = ''; 
+        files.forEach(fileObj => {
+            const div = document.createElement('div');
+            div.className = 'list-group-item';
+            div.innerHTML = `
+                <div class="d-flex align-items-center w-100">
+                    <input class="form-check-input file-checkbox" type="checkbox" value="${fileObj.name}" data-has-oil="${fileObj.has_oil}" onchange="updateSelectionCount()">
+                    <span class="file-name flex-grow-1 ms-1" onclick="viewResult('${fileObj.name}', this)">${fileObj.name}</span>
+                    <img src="${API_URL}/api/thumbnail/${fileObj.name}" class="roi-thumb" loading="lazy" alt="thumb">
+                </div>
+            `;
+            list.appendChild(div);
+        });
+        updateSelectionCount();
+    }
+
+    async function loadFileList() {
+        document.getElementById('file-list').innerHTML = '<div class="text-center mt-4 text-muted">Loading...</div>';
+        try {
+            const res = await fetch(`${API_URL}/api/get_test_list`);
+            const data = await res.json();
+            renderFileList(data.files);
+        } catch (error) {
+            document.getElementById('file-list').innerText = "API Connection Failed";
+        }
+    }
+
+    async function randomSelect20() {
+        try {
+            const res = await fetch(`${API_URL}/api/get_random_selection`);
+            const data = await res.json();
+            const selectedNames = data.selected;
+
+            document.querySelectorAll('.file-checkbox').forEach(cb => {
+                cb.checked = selectedNames.includes(cb.value);
+            });
+            updateSelectionCount();
+        } catch (error) {
+            alert("Failed to fetch random list. Please check backend.");
+        }
+    }
+
+    function deselectAll() {
+        document.querySelectorAll('.file-checkbox').forEach(cb => cb.checked = false);
+        updateSelectionCount();
+    }
+
+    function fullRefresh() {
+        if(isS1GalleryMode) toggleS1Gallery(false); 
+        evalMemory = {};
+        globalStats = { patches: 0, tp: 0, fp: 0, tn: 0, fn: 0 };
+        document.getElementById('list-candidates').innerHTML = '';
+        document.getElementById('list-excluded').innerHTML = '';
+        document.getElementById('list-stage2').innerHTML = '';
+        updateOverallUI();
+        
+        const triggerEl = document.querySelector('#tab-data');
+        bootstrap.Tab.getOrCreateInstance(triggerEl).show();
+        
+        loadFileList(); 
+    }
+
+    function clearRoiMemory(roi) {
+        if (evalMemory[roi]) {
+            delete evalMemory[roi];
+        }
+        const s1Item = document.getElementById(`s1-item-${roi}`);
+        if (s1Item) s1Item.remove();
+        
+        const s2Item = document.getElementById(`s2-item-${roi}`);
+        if (s2Item) s2Item.remove();
+        
+        recalcGlobalStats();
+    }
+
+    function recalcGlobalStats() {
+        globalStats = { patches: 0, tp: 0, fp: 0, tn: 0, fn: 0 };
+        for (const key in evalMemory) {
+            const m = evalMemory[key].metrics;
+            globalStats.patches++;
+            globalStats.tp += m.tp;
+            globalStats.fp += m.fp;
+            globalStats.tn += m.tn;
+            globalStats.fn += m.fn;
+        }
+        updateOverallUI();
+    }
+
+    function selectByOil(mode) {
+        document.querySelectorAll('#file-list .file-checkbox').forEach(cb => {
+            if (mode === 'all') cb.checked = true;
+            else if (mode === true) cb.checked = (cb.getAttribute('data-has-oil') === 'true');
+            else if (mode === false) cb.checked = (cb.getAttribute('data-has-oil') === 'false');
+        });
+        updateSelectionCount();
+    }
+
+    function updateSelectionCount() {
+        const count = document.querySelectorAll('.file-checkbox:checked').length;
+        document.getElementById('selected-count').innerText = `${count} selected`;
+    }
+
+    function toggleS1Gallery(forceState = null) {
+        if (forceState === null) {
+            if (lastRunStage !== 'stage1' || Object.keys(evalMemory).length === 0) {
+                alert("⚠️ 錯誤：此功能僅在執行「Two-stage (S1 Filter)」後才可使用！\n(This feature is only available after running Stage 1)");
+                return;
+            }
+            isS1GalleryMode = !isS1GalleryMode;
+        } else {
+            isS1GalleryMode = forceState;
+        }
+
+        const mainVis = document.getElementById('main-vis-container');
+        const galleryVis = document.getElementById('s1-gallery-container');
+        const btnGallery = document.getElementById('btn-s1-gallery');
+        const btnGrid = document.getElementById('btn-toggle-grid');
+        const radioBtns = document.querySelectorAll('#view-controls .btn-check');
+
+        if (isS1GalleryMode) {
+            mainVis.style.display = 'none';
+            galleryVis.classList.remove('hidden');
+            btnGallery.classList.replace('btn-outline-warning', 'btn-warning');
+            btnGallery.classList.add('text-dark');
+            
+            btnGrid.disabled = true;
+            radioBtns.forEach(btn => btn.disabled = true);
+            
+            renderS1Gallery();
+        } else {
+            mainVis.style.display = 'block';
+            galleryVis.classList.add('hidden');
+            btnGallery.classList.replace('btn-warning', 'btn-outline-warning');
+            btnGallery.classList.remove('text-dark');
+            
+            btnGrid.disabled = false;
+            if (!isGridMode && evalMemory[currentRoi]) {
+                document.getElementById('btn-pred').disabled = false;
+                document.getElementById('btn-overlay').disabled = false;
+            }
+        }
+    }
+
+    function renderS1Gallery() {
+        const candContainer = document.getElementById('gallery-candidates');
+        const exclContainer = document.getElementById('gallery-excluded');
+        candContainer.innerHTML = '';
+        exclContainer.innerHTML = '';
+        let candCount = 0, exclCount = 0;
+
+        for (const roi in evalMemory) {
+            const data = evalMemory[roi];
+            if (data.stage !== 'stage1') continue;
+
+            const item = document.createElement('div');
+            item.className = 'gallery-item';
+            item.setAttribute('onclick', `viewResultFromGallery('${roi}')`);
+            
+            item.innerHTML = `
+                <span title="${roi}" class="gallery-title">${roi}</span>
+                <img src="${API_URL}/api/thumbnail/${roi}" loading="lazy" alt="thumb">
+                <span class="badge ${data.is_candidate ? 'bg-danger' : 'bg-success'}">Prob: ${(data.prob * 100).toFixed(1)}%</span>
+            `;
+            
+            if (data.is_candidate) {
+                candContainer.appendChild(item);
+                candCount++;
+            } else {
+                exclContainer.appendChild(item);
+                exclCount++;
+            }
+        }
+        
+        document.getElementById('gallery-cand-count').innerText = candCount;
+        document.getElementById('gallery-excl-count').innerText = exclCount;
+    }
+
+    function viewResultFromGallery(roi) {
+        toggleS1Gallery(false);
+        const listElem = document.querySelector(`.file-checkbox[value="${roi}"]`);
+        viewResult(roi, listElem ? listElem.nextElementSibling : null);
+    }
+
+    function toggleGrid() {
+        isGridMode = !isGridMode;
+        const gridBox = document.getElementById('grid-box');
+        const imgBox = document.getElementById('img-box');
+        const toggleBtn = document.getElementById('btn-toggle-grid');
+        const radioBtns = document.querySelectorAll('#view-controls .btn-check');
+
+        if (isGridMode) {
+            gridBox.classList.add('active');
+            imgBox.classList.add('hidden');
+            toggleBtn.innerText = '◻';
+            radioBtns.forEach(btn => btn.disabled = true);
+        } else {
+            gridBox.classList.remove('active');
+            imgBox.classList.remove('hidden');
+            toggleBtn.innerText = '⊞';
+            document.getElementById('btn-rgb').disabled = false;
+            document.getElementById('btn-gt').disabled = false;
+            if (evalMemory[currentRoi]) {
+                document.getElementById('btn-pred').disabled = false;
+                document.getElementById('btn-overlay').disabled = false;
+            }
+        }
+    }
+
+    function switchView(viewType) {
+        document.getElementById('layer-gt').style.opacity = (viewType === 'gt' || viewType === 'overlay') ? 1 : 0;
+        document.getElementById('layer-pred').style.opacity = (viewType === 'pred' || viewType === 'overlay') ? 1 : 0;
+        
+        if (viewType === 'overlay') {
+            document.getElementById('layer-gt').style.opacity = 0; 
+            if(evalMemory[currentRoi]) document.getElementById('layer-pred').src = "data:image/png;base64," + evalMemory[currentRoi].mask_overlay_b64;
+        } else if (viewType === 'pred') {
+            if(evalMemory[currentRoi]) document.getElementById('layer-pred').src = "data:image/png;base64," + evalMemory[currentRoi].mask_pred_b64;
+        }
+    }
+
+    async function viewResult(fileName, element) {
+        document.querySelectorAll('.list-group-item').forEach(el => el.classList.remove('active-view'));
+        if(element) element.closest('.list-group-item').classList.add('active-view');
+        
+        currentRoi = fileName;
+        document.getElementById('current-view-name').innerText = fileName;
+        
+        const res = await fetch(`${API_URL}/api/load_image/${fileName}`);
+        const data = await res.json();
+        
+        document.getElementById('layer-rgb').src = "data:image/png;base64," + data.rgb_base64;
+        document.getElementById('layer-gt').src = "data:image/png;base64," + data.gt_base64;
+        
+        document.getElementById('grid-rgb').src = "data:image/png;base64," + data.rgb_base64;
+        document.getElementById('grid-gt').src = "data:image/png;base64," + data.gt_base64;
+        document.getElementById('grid-overlay-rgb').src = "data:image/png;base64," + data.rgb_base64;
+
+        if (evalMemory[fileName]) {
+            updatePatchMetricsUI(evalMemory[fileName]);
+        } else {
+            document.getElementById('cur-status').innerText = "Viewer Mode";
+            document.getElementById('cur-status').className = "metric-value text-light";
+            document.getElementById('cur-prob').innerText = "--";
+            
+            document.getElementById('seg-single-metrics').style.display = 'block';
+            document.getElementById('cls-single-metrics').style.display = 'none';
+            ['cur-prec', 'cur-iou', 'cur-rec'].forEach(id => document.getElementById(id).innerText = "-- %");
+            
+            document.getElementById('layer-pred').src = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
+            document.getElementById('grid-pred').src = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
+            document.getElementById('grid-overlay-mask').src = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
+            
+            if(!isGridMode) {
+                document.getElementById('btn-pred').disabled = true;
+                document.getElementById('btn-overlay').disabled = true;
+                document.getElementById('btn-rgb').checked = true;
+                switchView('rgb');
+            }
+        }
+    }
+
+    function moveToStage1List(roi, data) {
+        const targetListId = data.is_candidate ? 'list-candidates' : 'list-excluded';
+        const targetList = document.getElementById(targetListId);
+        
+        const item = document.createElement('div');
+        item.id = `s1-item-${roi}`;
+        item.className = 'list-group-item text-light small py-1';
+        item.setAttribute('data-roi', roi); 
+        item.innerHTML = `
+            <div class="d-flex align-items-center w-100">
+                <span class="file-name flex-grow-1 ms-1" onclick="viewResult('${roi}', this)">${roi}</span>
+                <span class="badge ${data.is_candidate ? 'bg-danger' : 'bg-success'}">${(data.prob*100).toFixed(0)}%</span>
+                <img src="${API_URL}/api/thumbnail/${roi}" class="roi-thumb" loading="lazy" alt="thumb">
+            </div>
+        `;
+        targetList.appendChild(item);
+    }
+
+    function moveToStage2List(roi, data) {
+        const targetList = document.getElementById('list-stage2');
+        const item = document.createElement('div');
+        item.id = `s2-item-${roi}`;
+        item.className = 'list-group-item text-light small py-1';
+        item.innerHTML = `
+            <div class="d-flex align-items-center w-100">
+                <span class="file-name flex-grow-1 ms-1" onclick="viewResult('${roi}', this)">${roi}</span>
+                <img src="${API_URL}/api/thumbnail/${roi}" class="roi-thumb" loading="lazy" alt="thumb">
+            </div>
+        `;
+        targetList.appendChild(item);
+    }
+
+    async function runEvaluation(stage) {
+        let targets = Array.from(document.querySelectorAll('.file-checkbox:checked')).map(cb => cb.value);
+        if (targets.length === 0 && currentRoi) targets = [currentRoi];
+        if (targets.length === 0) return alert("Please select at least one patch!");
+        
+        if (isS1GalleryMode) toggleS1Gallery(false);
+        
+        const model = document.getElementById('stage1-model').value;
+        const pContainer = document.getElementById('eval-progress-container');
+        const pBar = document.getElementById('eval-progress-bar');
+        pContainer.style.display = 'flex';
+        
+        lastRunStage = (stage === 'baseline') ? 'baseline' : 'stage1';
+        evalMemory = {};
+        globalStats = { patches: 0, tp: 0, fp: 0, tn: 0, fn: 0 };
+        document.getElementById('list-candidates').innerHTML = '';
+        document.getElementById('list-excluded').innerHTML = '';
+        document.getElementById('list-stage2').innerHTML = '';
+        updateOverallUI();
+
+        if (currentRoi && !targets.includes(currentRoi)) {
+            viewResult(currentRoi);
+        }
+        
+        let completed = 0;
+        const total = targets.length;
+
+        for (const roi of targets) {
+            const listElem = document.querySelector(`.file-checkbox[value="${roi}"]`);
+            if (currentRoi !== roi) {
+                await viewResult(roi, listElem ? listElem.nextElementSibling : null);
+            }
+
+            document.getElementById('cur-status').innerText = `Processing...`;
+            
+            clearRoiMemory(roi);
+
+            const res = await fetch(`${API_URL}/api/evaluate/${roi}?stage=${stage}&model=${model}`, { method: 'POST' });
+            const data = await res.json();
+            
+            data.has_oil = listElem ? (listElem.getAttribute('data-has-oil') === 'true') : false;
+            data.stage = stage; 
+            
+            evalMemory[roi] = data;
+            recalcGlobalStats(); 
+            
+            if (stage === 'stage1') {
+                moveToStage1List(roi, data);
+            }
+            if (stage === 'baseline') {
+                moveToStage2List(roi, data);
+            }
+            
+            updatePatchMetricsUI(data);
+
+            completed++;
+            pBar.style.width = Math.round((completed / total) * 100) + '%';
+        }
+
+        setTimeout(() => { pContainer.style.display = 'none'; pBar.style.width = '0%'; }, 2000);
+        
+        if (stage === 'stage1') {
+            bootstrap.Tab.getOrCreateInstance(document.querySelector('#tab-stage1')).show();
+            toggleS1Gallery(true);
+        } else if (stage === 'baseline') {
+            bootstrap.Tab.getOrCreateInstance(document.querySelector('#tab-stage2')).show();
+            toggleS1Gallery(false);
+        }
+    }
+
+    async function runStage2ForCandidates() {
+        const candidates = Array.from(document.querySelectorAll('#list-candidates .list-group-item')).map(el => el.getAttribute('data-roi'));
+        if (candidates.length === 0) return alert("No Candidates to evaluate!");
+        
+        if (isS1GalleryMode) toggleS1Gallery(false);
+
+        const model = document.getElementById('stage1-model').value;
+        const pContainer = document.getElementById('eval-progress-container');
+        const pBar = document.getElementById('eval-progress-bar');
+        pContainer.style.display = 'flex';
+        
+        lastRunStage = 'hybrid'; 
+        let completed = 0;
+        const total = candidates.length;
+
+        for (const roi of candidates) {
+            const listElem = document.querySelector(`.file-checkbox[value="${roi}"]`);
+            if (currentRoi !== roi) {
+                await viewResult(roi, document.getElementById(`s1-item-${roi}`));
+            }
+
+            document.getElementById('cur-status').innerText = `Processing...`;
+            
+            clearRoiMemory(roi); 
+
+            const res = await fetch(`${API_URL}/api/evaluate/${roi}?stage=hybrid&model=${model}`, { method: 'POST' });
+            const data = await res.json();
+            
+            data.has_oil = listElem ? (listElem.getAttribute('data-has-oil') === 'true') : false;
+            data.stage = 'hybrid'; 
+            
+            evalMemory[roi] = data;
+            recalcGlobalStats();
+            
+            moveToStage1List(roi, data);
+            moveToStage2List(roi, data);
+            updatePatchMetricsUI(data);
+
+            completed++;
+            pBar.style.width = Math.round((completed / total) * 100) + '%';
+        }
+
+        setTimeout(() => { pContainer.style.display = 'none'; pBar.style.width = '0%'; }, 2000);
+        bootstrap.Tab.getOrCreateInstance(document.querySelector('#tab-stage2')).show();
+    }
+
+    function updatePatchMetricsUI(data) {
+        document.getElementById('cur-status').innerText = data.status;
+        document.getElementById('cur-status').className = data.is_candidate ? "metric-value text-danger" : "metric-value text-success";
+        document.getElementById('cur-prob').innerText = (data.prob * 100).toFixed(2) + "%";
+        
+        const isCls = (data.stage === 'stage1');
+        document.getElementById('seg-single-metrics').style.display = isCls ? 'none' : 'block';
+        document.getElementById('cls-single-metrics').style.display = isCls ? 'block' : 'none';
+
+        if (isCls) {
+            document.getElementById('cur-actual').innerText = data.has_oil ? "Has Oil" : "No Oil";
+            document.getElementById('cur-actual').className = data.has_oil ? "metric-value text-warning" : "metric-value text-success";
+            document.getElementById('cur-action').innerText = data.is_candidate ? "Candidate" : "Excluded";
+            document.getElementById('cur-action').className = data.is_candidate ? "metric-value text-warning" : "metric-value text-success";
+        } else {
+            const tp = data.metrics.tp, fp = data.metrics.fp, tn = data.metrics.tn, fn = data.metrics.fn;
+            const total_oil = tp + fn;
+            const total_pred_oil = tp + fp;
+            
+            document.getElementById('cur-iou').innerText  = (tp + fp + fn === 0) ? "N/A (No Oil)" : (tp / (tp + fp + fn) * 100).toFixed(1) + " %";
+            document.getElementById('cur-rec').innerText  = (total_oil === 0) ? "N/A (No Oil)" : (tp / total_oil * 100).toFixed(1) + " %";
+            document.getElementById('cur-prec').innerText = (total_pred_oil === 0) ? (tn > 0 ? "N/A (No Pred)" : "0.0 %") : (tp / total_pred_oil * 100).toFixed(1) + " %";
+        }
+        
+        document.getElementById('grid-pred').src = "data:image/png;base64," + data.mask_pred_b64;
+        document.getElementById('grid-overlay-mask').src = "data:image/png;base64," + data.mask_overlay_b64;
+
+        if(!isGridMode) {
+            document.getElementById('btn-pred').disabled = false;
+            document.getElementById('btn-overlay').disabled = false;
+            document.getElementById('btn-overlay').checked = true;
+            switchView('overlay');
+        }
+    }
+
+    function updateOverallUI() {
+        document.getElementById('oa-count').innerText = globalStats.patches;
+        
+        const isCls = (lastRunStage === 'stage1');
+        document.getElementById('seg-overall-metrics').style.display = isCls ? 'none' : 'block';
+        document.getElementById('cls-overall-metrics').style.display = isCls ? 'block' : 'none';
+
+        if (isCls) {
+            let img_tp = 0, img_fp = 0, img_tn = 0, img_fn = 0;
+
+            for (const key in evalMemory) {
+                const d = evalMemory[key];
+                if (d.has_oil && d.is_candidate) img_tp++;
+                if (!d.has_oil && d.is_candidate) img_fp++;
+                if (!d.has_oil && !d.is_candidate) img_tn++;
+                if (d.has_oil && !d.is_candidate) img_fn++;
+            }
+
+            const total = img_tp + img_fp + img_tn + img_fn;
+            const rec = (img_tp + img_fn) > 0 ? (img_tp / (img_tp + img_fn) * 100).toFixed(1) + " %" : "N/A";
+            const prec = (img_tp + img_fp) > 0 ? (img_tp / (img_tp + img_fp) * 100).toFixed(1) + " %" : "N/A";
+
+            document.getElementById('oa-img-rec').innerText = rec;
+            document.getElementById('oa-img-prec').innerText = prec;
+            document.getElementById('oa-img-tn').innerText = img_tn;
+            document.getElementById('oa-img-fn').innerText = img_fn;
+
+        } else {
+            if (globalStats.patches === 0) {
+                ['oa-prec', 'oa-iou', 'oa-rec'].forEach(id => document.getElementById(id).innerText = "-- %");
+                return;
+            }
+            const tp = globalStats.tp, fp = globalStats.fp, tn = globalStats.tn, fn = globalStats.fn;
+            const prec = tp + fp > 0 ? (tp / (tp + fp) * 100).toFixed(2) + " %" : "0.00 %";
+            const rec = tp + fn > 0 ? (tp / (tp + fn) * 100).toFixed(2) + " %" : "0.00 %";
+            const iou = tp + fp + fn > 0 ? (tp / (tp + fp + fn) * 100).toFixed(2) + " %" : "0.00 %";
+
+            document.getElementById('oa-prec').innerText = prec;
+            document.getElementById('oa-iou').innerText = iou;
+            document.getElementById('oa-rec').innerText = rec;
+        }
+    }
+
+    window.onload = async () => {
+        await loadFileList();
+    };
+</script>
+</body>
+</html>
